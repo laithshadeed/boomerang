@@ -22,6 +22,7 @@
         "plugins/third-party-analytics.js",
         "node_modules/usertiming-compression/src/usertiming-compression.js",
         "plugins/usertiming.js",
+		"plugins/zzz-last-plugin.js",
         "plugins/mq.js"
     ]
 }

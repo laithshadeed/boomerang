@@ -81,7 +81,6 @@ module.exports = function() {
 	var src = [ "boomerang.js" ];
 	var plugins = grunt.file.readJSON("plugins.json");
 	src.push(plugins.plugins);
-	src.push(path.join(pluginsDir, "zzz-last-plugin.js"));
 
 	//
 	// Ensure env.json exists
