@@ -1647,7 +1647,11 @@ BOOMR_check_doc_domain();
 			 * @memberof BOOMR.utils
 			 */
 			isArray: function(ary) {
-				return Object.prototype.toString.call(ary) === "[object Array]";
+				if (Array.isArray(ary)) {
+					return Array.isArray(ary);
+				} else {
+					return Object.prototype.toString.call(ary) === "[object Array]";
+				}
 			},
 
 			/**
