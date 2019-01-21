@@ -126,7 +126,7 @@
 	var INITIATOR_TYPES = {
 		/** Unknown type */
 		"other": 0,
-		/** IMG element */
+		/** IMG element (or IMAGE element inside a SVG for IE, Edge and Firefox) */
 		"img": 1,
 		/** LINK element (i.e. CSS) */
 		"link": 2,
@@ -166,6 +166,22 @@
 		"stylesheet": 4
 	};
 
+	var RT_FIELDS_TIMESTAMPS = [
+		"startTime",
+		"redirectStart",
+		"redirectEnd",
+		"fetchStart",
+		"domainLookupStart",
+		"domainLookupEnd",
+		"connectStart",
+		"secureConnectionStart",
+		"connectEnd",
+		"requestStart",
+		"responseStart",
+		"responseEnd",
+		"workerStart"
+	];
+
 	// Words that will be broken (by ensuring the optimized trie doesn't contain
 	// the whole string) in URLs, to ensure NoScript doesn't think this is an XSS attack
 	var DEFAULT_XSS_BREAK_WORDS = [
@@ -202,6 +218,9 @@
 
 	// Link attributes
 	var SPECIAL_DATA_LINK_ATTR_TYPE = "4";
+
+	// Namespaced data
+	var SPECIAL_DATA_NAMESPACED_TYPE = "5";
 
 	/**
 	 * Converts entries to a Trie:
@@ -341,9 +360,9 @@
 	/**
 	 * Trims the timing, returning an offset from the startTime in ms
 	 *
-	 * @param [number] time Time
-	 * @param [number] startTime Start time
-	 * @returns [number] Number of ms from start time
+	 * @param {number} time Time
+	 * @param {number} startTime Start time
+	 * @returns {number} Number of ms from start time
 	 */
 	function trimTiming(time, startTime) {
 		if (typeof time !== "number") {
@@ -544,25 +563,16 @@
 			// offset all of the entries by the specified offset for this frame
 			var frameEntries = frame.performance.getEntriesByType("resource"),
 			    frameFixedEntries = [];
+			if (frame === BOOMR.window && impl.collectedEntries) {
+				Array.prototype.push.apply(frameEntries, impl.collectedEntries);
+				impl.collectedEntries = [];
+			}
 
 			for (i = 0; frameEntries && i < frameEntries.length; i++) {
 				t = frameEntries[i];
 				rtEntry = {
 					name: t.name,
 					initiatorType: t.initiatorType,
-					startTime: t.startTime + offset,
-					redirectStart: t.redirectStart ? (t.redirectStart + offset) : 0,
-					redirectEnd: t.redirectEnd ? (t.redirectEnd + offset) : 0,
-					fetchStart: t.fetchStart ? (t.fetchStart + offset) : 0,
-					domainLookupStart: t.domainLookupStart ? (t.domainLookupStart + offset) : 0,
-					domainLookupEnd: t.domainLookupEnd ? (t.domainLookupEnd + offset) : 0,
-					connectStart: t.connectStart ? (t.connectStart + offset) : 0,
-					secureConnectionStart: t.secureConnectionStart ? (t.secureConnectionStart + offset) : 0,
-					connectEnd: t.connectEnd ? (t.connectEnd + offset) : 0,
-					requestStart: t.requestStart ? (t.requestStart + offset) : 0,
-					responseStart: t.responseStart ? (t.responseStart + offset) : 0,
-					responseEnd: t.responseEnd ? (t.responseEnd + offset) : 0,
-					workerStart: t.workerStart ? (t.workerStart + offset) : 0,
 					encodedBodySize: t.encodedBodySize,
 					decodedBodySize: t.decodedBodySize,
 					transferSize: t.transferSize,
@@ -570,6 +580,14 @@
 					visibleDimensions: visibleEntries[t.name],
 					latestTime: getResourceLatestTime(t)
 				};
+				for (var field = 0; field < RT_FIELDS_TIMESTAMPS.length; field++) {
+					var key = RT_FIELDS_TIMESTAMPS[field];
+					rtEntry[key] = ((key === "startTime") || t[key]) ? (t[key] + offset) : 0;
+				}
+
+				if (t.hasOwnProperty("_data")) {
+					rtEntry._data = t._data;
+				}
 
 				// If this is a script, set its flags
 				if ((t.initiatorType === "script" || t.initiatorType === "link") && scripts[t.name]) {
@@ -613,19 +631,22 @@
 		return entries;
 	}
 
-    /**
+	/**
 	 * Collect external resources by tagName
 	 *
-	 * @param [Element] a an anchor element
-	 * @param [Object] obj object of resources where the key is the url
-	 * @param [string] tagName tag name to collect
+	 * @param {Element} a an anchor element
+	 * @param {Object} obj object of resources where the key is the url
+	 * @param {string} tagName tag name to collect
 	 */
 	function collectResources(a, obj, tagName) {
 		Array.prototype
 			.forEach
 			.call(a.ownerDocument.getElementsByTagName(tagName), function(r) {
 				// Get canonical URL
-				a.href = r.src || r.href;
+				a.href = r.currentSrc ||
+					r.src ||
+					(typeof r.getAttribute === "function" && r.getAttribute("xlink:href")) ||
+					r.href;
 
 				// only get external resource
 				if (a.href.match(/^https?:\/\//)) {
@@ -643,7 +664,7 @@
 	 *
 	 * If a string, return a string.
 	 *
-	 * @param [number] n Number
+	 * @param {number} n Number
 	 * @returns {string} Base-36 number, empty string, or string
 	 */
 	function toBase36(n) {
@@ -678,36 +699,66 @@
 			for (i = 0; i < elements.length; i++) {
 				el = elements[i];
 
+				if (!el) {
+					continue;
+				}
+
 				// look at this element if it has a src attribute or xlink:href, and we haven't already looked at it
-				if (el) {
-					// src = IMG, IFRAME
-					// xlink:href = svg:IMAGE
-					src = el.src || el.getAttribute("src") || el.getAttribute("xlink:href");
+				// currentSrc = IMG inside a PICTURE element or IMG srcset
+				// src = IMG, IFRAME
+				// xlink:href = svg:IMAGE
+				src = el.currentSrc ||
+					el.src ||
+					(typeof el.getAttribute === "function" &&
+						(el.getAttribute("src")) || el.getAttribute("xlink:href"));
 
-					// change src to be relative
-					a.href = src;
-					src = a.href;
+				// make src absolute
+				a.href = src;
+				src = a.href;
 
-					if (src && !entries[src]) {
-						rect = el.getBoundingClientRect();
+				if (!src || entries[src]) {
+					continue;
+				}
 
-						// Require both height & width to be non-zero
-						// IE <= 8 does not report rect.height/rect.width so we need offsetHeight & width
-						if ((rect.height || el.offsetHeight) && (rect.width || el.offsetWidth)) {
-							entries[src] = [
-								rect.height || el.offsetHeight,
-								rect.width || el.offsetWidth,
-								Math.round(rect.top + y),
-								Math.round(rect.left + x)
-							];
+				rect = el.getBoundingClientRect();
 
-							// If this is an image, it has a naturalHeight & naturalWidth
-							// if these are different from its display height and width, we should report that
-							// because it indicates scaling in HTML
-							if ((el.naturalHeight || el.naturalWidth) && (entries[src][0] !== el.naturalHeight || entries[src][1] !== el.naturalWidth)) {
-								entries[src].push(el.naturalHeight, el.naturalWidth);
-							}
-						}
+				// Require both height & width to be non-zero
+				// IE <= 8 does not report rect.height/rect.width so we need offsetHeight & width
+				if ((rect.height || el.offsetHeight) && (rect.width || el.offsetWidth)) {
+					entries[src] = [
+						rect.height || el.offsetHeight,
+						rect.width || el.offsetWidth,
+						Math.round(rect.top + y),
+						Math.round(rect.left + x)
+					];
+
+					// If this is an image, it has a naturalHeight & naturalWidth
+					// if these are different from its display height and width, we should report that
+					// because it indicates scaling in HTML
+					if (!el.naturalHeight && !el.naturalWidth) {
+						continue;
+					}
+
+					// If the image came from a srcset, then the naturalHeight/Width will be density corrected.
+					// We get the actual physical dimensions by assigning the image to an uncorrected Image object.
+					// This should load from in-memory cache, so there should be no extra load.
+					var realImg, nH, nW;
+
+					if (el.currentSrc && (el.srcset || (el.parentNode && el.parentNode.nodeName && el.parentNode.nodeName.toUpperCase() === "PICTURE"))) {
+						// We need to create this Image in the window that contains the element, and not
+						// the boomerang window.
+						realImg = el.isConnected ? el.ownerDocument.createElement("IMG") : new BOOMR.window.Image();
+						realImg.src = src;
+					}
+					else {
+						realImg = el;
+					}
+
+					nH = realImg.naturalHeight || el.naturalHeight;
+					nW = realImg.naturalWidth  || el.naturalWidth;
+
+					if ((nH || nW) && (entries[src][0] !== nH || entries[src][1] !== nW)) {
+						entries[src].push(nH, nW);
 					}
 				}
 			}
@@ -728,7 +779,7 @@
 	 */
 	function getFilteredResourceTiming(from, to, initiatorTypes) {
 		var entries = findPerformanceEntriesForFrame(BOOMR.window, true, 0, 0),
-		    i, e, results = {}, initiatorType, url, data,
+		    i, e,
 		    navStart = getNavStartTime(BOOMR.window), countCollector = {};
 
 		if (!entries || !entries.length) {
@@ -810,9 +861,9 @@
 			// transferSize: how many bytes were over the wire. It can be 0 in the case of X-O,
 			// or if it was fetched from a cache.
 			//
-			// encodedBodySize: the size after applying encoding (e.g. gzipped size).  It is 0 if X-O.
+			// encodedBodySize: the size after applying encoding (e.g. gzipped size).  It is 0 if X-O or no content (eg: beacon).
 			//
-			// decodedBodySize: the size after removing encoding (e.g. the original content size).  It is 0 if X-O.
+			// decodedBodySize: the size after removing encoding (e.g. the original content size).  It is 0 if X-O or no content (eg: beacon).
 			//
 			// Here are the possible combinations of values: [encodedBodySize, transferSize, decodedBodySize]
 			//
@@ -843,8 +894,8 @@
 	/**
 	 * Decompresses size information back into the specified resource
 	 *
-	 * @param [string] compressed Compressed string
-	 * @param [ResourceTiming] resource ResourceTiming object
+	 * @param {string} compressed Compressed string
+	 * @param {ResourceTiming} resource ResourceTiming object
 	 */
 	function decompressSize(compressed, resource) {
 		var split, i;
@@ -1129,10 +1180,10 @@
 	/**
 	 * Gathers performance entries and compresses the result.
 	 *
-	 * @param [number] from Only get timings from
-	 * @param [number] to Only get timings up to
+	 * @param {number} from Only get timings from
+	 * @param {number} to Only get timings up to
 	 *
-	 * @returns An object containing the Optimized performance entries trie and
+	 * @returns {object} An object containing the Optimized performance entries trie and
 	 * the optimized server timing lookup
 	 * @memberof BOOMR.plugins.ResourceTiming
 	 */
@@ -1212,31 +1263,50 @@
 					}, "");
 			}
 
-
 			if (e.hasOwnProperty("linkAttrs")) {
 				data += SPECIAL_DATA_PREFIX + SPECIAL_DATA_LINK_ATTR_TYPE + e.linkAttrs;
 			}
 
 			url = trimUrl(e.name, impl.trimUrls);
 
-			// if this entry already exists, add a pipe as a separator
-			if (results[url] !== undefined) {
-				results[url] += "|" + data;
-			}
-			else if (e.visibleDimensions) {
-				// We use * as an additional separator to indicate it is not a new resource entry
-				// The following characters will not be URL encoded:
-				// *!-.()~_ but - and . are special to number representation so we don't use them
-				// After the *, the type of special data (ResourceTiming = 0) is added
-				results[url] =
-					SPECIAL_DATA_PREFIX +
-					SPECIAL_DATA_DIMENSION_TYPE +
-					e.visibleDimensions.map(Math.round).map(toBase36).join(",").replace(/,+$/, "") +
-					"|" +
-					data;
+			if (!e.hasOwnProperty("_data")) {
+				// if this entry already exists, add a pipe as a separator
+				if (results[url] !== undefined) {
+					results[url] += "|" + data;
+				}
+				else if (e.visibleDimensions) {
+					// We use * as an additional separator to indicate it is not a new resource entry
+					// The following characters will not be URL encoded:
+					// *!-.()~_ but - and . are special to number representation so we don't use them
+					// After the *, the type of special data (ResourceTiming = 0) is added
+					results[url] =
+						SPECIAL_DATA_PREFIX +
+						SPECIAL_DATA_DIMENSION_TYPE +
+						e.visibleDimensions.map(Math.round).map(toBase36).join(",").replace(/,+$/, "") +
+						"|" +
+						data;
+				}
+				else {
+					results[url] = data;
+				}
 			}
 			else {
-				results[url] = data;
+				var namespacedData = "";
+				for (var key in e._data) {
+					if (e._data.hasOwnProperty(key)) {
+						namespacedData += SPECIAL_DATA_PREFIX + SPECIAL_DATA_NAMESPACED_TYPE + key + ":" + e._data[key];
+					}
+				}
+
+				if (typeof results[url] === "undefined") {
+					// we haven't seen this resource yet, treat this potential stub as the canonical version
+					results[url] = data + namespacedData;
+				}
+				else {
+					// we have seen this resource before
+					// forget the timing data of `e`, just supplement the previous entry with the new `namespacedData`
+					results[url] += namespacedData;
+				}
 			}
 
 			if (e.visibleDimensions) {
@@ -1260,7 +1330,7 @@
 	 *
 	 * Array must be pre-sorted by fetchStart, then by responseStart||responseEnd
 	 *
-	 * @param [ResourceTiming[]] resources ResourceTiming-like resources, with just
+	 * @param {ResourceTiming[]} resources ResourceTiming-like resources, with just
 	 *  a fetchStart and responseEnd
 	 *
 	 * @returns Duration, in milliseconds
@@ -1297,7 +1367,7 @@
 	 * Calculates the union of durations of the specified resources.  If
 	 * any resources overlap, those timeslices are not double-counted.
 	 *
-	 * @param [ResourceTiming[]] resources Resources
+	 * @param {ResourceTiming[]} resources Resources
 	 *
 	 * @returns Duration, in milliseconds
 	 * @memberof BOOMR.plugins.ResourceTiming
@@ -1364,8 +1434,8 @@
 	/**
 	 * Adds 'restiming' and 'servertiming' to the beacon
 	 *
-	 * @param [number] from Only get timings from
-	 * @param [number] to Only get timings up to
+	 * @param {number} from Only get timings from
+	 * @param {number} to Only get timings up to
 	 *
 	 * @memberof BOOMR.plugins.ResourceTiming
 	 */
@@ -1616,14 +1686,19 @@
 		},
 		xssBreakWords: DEFAULT_XSS_BREAK_WORDS,
 		urlLimit: DEFAULT_URL_LIMIT,
+
+		// overridable
 		clearOnBeacon: false,
 		trimUrls: [],
+		serverTiming: true,
+		monitorClearResourceTimings: false,
+		// overridable
+
 		/**
 		 * Array of resource types to track, or "*" for all.
 		 *  @type {string[]|string}
 		 */
 		trackedResourceTypes: "*",
-		serverTiming: true,
 		done: function() {
 			// Stop if we've already sent a nav beacon (both xhr and spa* beacons
 			// add restiming manually).
@@ -1683,13 +1758,16 @@
 		 * @param {number} [config.ResourceTiming.urlLimit] URL length limit, after which `...` will be used
 		 * @param {string[]|RegExp[]} [config.ResourceTiming.trimUrls] List of strings of RegExps
 		 * to trim from URLs.
+		 * @param {boolean} [config.ResourceTiming.monitorClearResourceTimings] Whether or not to instrument
+		 * `performance.clearResourceTimings`
 		 *
 		 * @returns {@link BOOMR.plugins.ResourceTiming} The ResourceTiming plugin for chaining
 		 * @memberof BOOMR.plugins.ResourceTiming
 		 */
 		init: function(config) {
 			BOOMR.utils.pluginConfig(impl, config, "ResourceTiming",
-				["xssBreakWords", "clearOnBeacon", "urlLimit", "trimUrls", "trackedResourceTypes", "serverTiming"]);
+				["xssBreakWords", "clearOnBeacon", "urlLimit", "trimUrls", "trackedResourceTypes", "serverTiming",
+					"monitorClearResourceTimings"]);
 
 			if (impl.initialized) {
 				return this;
@@ -1701,6 +1779,16 @@
 				BOOMR.subscribe("xhr_load", impl.xhr_load, null, impl);
 				BOOMR.subscribe("beacon", impl.onBeacon, null, impl);
 				BOOMR.subscribe("before_unload", impl.done, null, impl);
+
+				if (impl.monitorClearResourceTimings) {
+					var self = this;
+					BOOMR.window.performance.clearResourceTimings = (function(_){
+						return function() {
+							self.addResources(BOOMR.window.performance.getEntriesByType("resource"));
+							_.apply(BOOMR.window.performance, arguments);
+						};
+					})(BOOMR.window.performance.clearResourceTimings);
+				}
 			}
 			else {
 				impl.complete = true;
@@ -1751,6 +1839,36 @@
 			    typeof window.PerformanceResourceTiming !== "undefined";
 
 			return impl.supported;
+		},
+
+		/**
+		 * Saves an array of `PerformanceResourceTiming`-shaped objects which we will later insert into the trie.
+		 *
+		 * @param {array<object>} resources Array of objects that are shaped like `PerformanceResourceTiming`s
+		 * @param {high-resolution-timestamp} epoch Optional epoch for all of the timestamps of all of the resources
+		 *
+		 * @memberof BOOMR.plugins.ResourceTiming
+		 */
+		addResources: function(resources, epoch) {
+			if (!this.is_supported() || !BOOMR.utils.isArray(resources)) {
+				return;
+			}
+
+			impl.collectedEntries = impl.collectedEntries || [];
+			if (typeof epoch === "number") {
+				var topEpoch = BOOMR.window.performance.timeOrigin || BOOMR.window.performance.timing.navigationStart;
+				var offset = epoch - topEpoch;
+				resources = BOOMR.utils.arrayFilter(resources, function(entry) {
+					for (var field = 0; field < RT_FIELDS_TIMESTAMPS.length; field++) {
+						var key = RT_FIELDS_TIMESTAMPS[field];
+						if (entry.hasOwnProperty(key)) {
+							entry[key] += offset;
+						}
+					}
+					return true;
+				});
+			}
+			Array.prototype.push.apply(impl.collectedEntries, resources);
 		},
 
 		//

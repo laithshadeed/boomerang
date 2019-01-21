@@ -25,6 +25,10 @@ if (window.route_wait) {
 	hookOptions.routeChangeWaitFilter = window.route_wait;
 }
 
+if (window.history_route_filter) {
+	hookOptions.routeFilter = window.history_route_filter;
+}
+
 function hookHistoryBoomerang() {
 	if (window.BOOMR && BOOMR.version) {
 		if (BOOMR.plugins && BOOMR.plugins.History) {
@@ -34,7 +38,7 @@ function hookHistoryBoomerang() {
 	}
 }
 
-if (!window.reactDisableBoomerangHook) {
+if (!window.disableBoomerangHook) {
 	if (!hookHistoryBoomerang()) {
 		if (document.addEventListener) {
 			document.addEventListener("onBoomerangLoaded", hookHistoryBoomerang);
@@ -106,7 +110,7 @@ const Home = React.createClass({
 		if (typeof window.imgs !== "undefined" && window.imgs.hasOwnProperty("length")) {
 			images = window.imgs;
 		} else {
-			images = [];
+			images = [0];
 		}
 
 		var state =  {
@@ -122,27 +126,51 @@ const Home = React.createClass({
 		return state;
 	},
 	componentDidMount() {
-		var homeXHR = new XMLHttpRequest();
-		homeXHR.addEventListener("load", function (homeHtml) {
-			if(this.isMounted()) {
-				this.setState({
-					home: homeHtml.target.response
-				});
-			}
-		}.bind(this));
-		homeXHR.open("GET", "support/home.html?rnd=" + (Math.round(Math.random() * 1000)));
-		homeXHR.send(null);
+		if (!window.use_fetch) {
+			var homeXHR = new XMLHttpRequest();
+			homeXHR.addEventListener("load", function(homeHtml) {
+				if (this.isMounted()) {
+					this.setState({
+						home: homeHtml.target.response
+					});
+				}
+			}.bind(this));
+			homeXHR.open("GET", "support/home.html?rnd=" + (Math.round(Math.random() * 1000)));
+			homeXHR.send(null);
 
-		var widgetsXHR = new XMLHttpRequest();
-		widgetsXHR.addEventListener("load", function (result) {
-			if(this.isMounted()) {
-				this.setState({
-					widgets: JSON.parse(result.target.response)
+			var widgetsXHR = new XMLHttpRequest();
+			widgetsXHR.addEventListener("load", function(result) {
+				if (this.isMounted()) {
+					this.setState({
+						widgets: JSON.parse(result.target.response)
+					});
+				}
+			}.bind(this));
+			widgetsXHR.open("GET", "support/widgets.json?rnd=" + (Math.round(Math.random() * 1000)));
+			widgetsXHR.send(null);
+		}
+		else {
+			var that = this;
+			fetch("support/home.html?rnd=" + (Math.round(Math.random() * 1000)))
+				.then((response) => response.text())
+				.then(function(data) {
+					if (that.isMounted()) {
+						that.setState({
+							home: data
+						});
+					}
 				});
-			}
-		}.bind(this));
-		widgetsXHR.open("GET", "support/widgets.json?rnd=" + (Math.round(Math.random() * 1000)));
-		widgetsXHR.send(null);
+
+			fetch("support/widgets.json?rnd=" + (Math.round(Math.random() * 1000)))
+				.then((response) => response.json())
+				.then(function(data) {
+					if (that.isMounted()) {
+						that.setState({
+							widgets: data
+						});
+					}
+				});
+		}
 	},
 	cartMarkup() {
 		return { __html: this.state.home };
@@ -168,7 +196,7 @@ const Home = React.createClass({
 			this.state.addedLates = true;
 			setTimeout(function() {
 				var content = document.getElementById("root");
-				
+
 				window.window.late_imgs.forEach(function(imgDelay) {
 					var img = document.createElement("img");
 					if (imgDelay > 0) {
@@ -193,7 +221,7 @@ const Home = React.createClass({
 			return (
 				<div className="content">
 					<div dangerouslySetInnerHTML={this.cartMarkup()} />
-					<div class="cart-container" style={{display: "none"}}>
+					<div className="cart-container" style={{display: "none"}}>
 						<div id="cart-total">$444.44</div>
 					</div>
 					{images}
@@ -240,16 +268,38 @@ const Widget = React.createClass({
 		};
 	},
 	componentDidMount() {
-		var widgetXHR = new XMLHttpRequest();
-		widgetXHR.addEventListener("load", function(widgetHtml) {
-			if(this.isMounted()) {
-				this.setState({
-					widgetHtml: widgetHtml.target.response
-				});
-			}
-		}.bind(this));
-		widgetXHR.open("GET", "support/widget.html?rnd=" + (Math.round(Math.random() * 1000)));
-		widgetXHR.send(null);
+		var url;
+		if (this.props.params.delay) {
+			url = "/delay?delay=" + this.props.params.delay + "&file=/pages/12-react/support/widget.html?rnd=" + (Math.round(Math.random() * 1000));
+		}
+		else {
+			url = "support/widget.html?rnd=" + (Math.round(Math.random() * 1000));
+		}
+
+		if (!window.use_fetch) {
+			var widgetXHR = new XMLHttpRequest();
+			widgetXHR.addEventListener("load", function(widgetHtml) {
+				if (this.isMounted()) {
+					this.setState({
+						widgetHtml: widgetHtml.target.response
+					});
+				}
+			}.bind(this));
+			widgetXHR.open("GET", url);
+			widgetXHR.send(null);
+		}
+		else {
+			var that = this;
+			fetch(url)
+			.then((response) => response.text())
+			.then(function(data) {
+				if (that.isMounted()) {
+					that.setState({
+						widgetHtml: data
+					});
+				}
+			});
+		}
 	},
 	widgetMarkup() {
 		return { __html: this.state.widgetHtml };
@@ -264,7 +314,7 @@ const Widget = React.createClass({
 		return (
 			<div>
 				<div dangerouslySetInnerHTML={this.widgetMarkup()} />
-				<div class="cart-container" style={{display: "none"}}>
+				<div className="cart-container" style={{display: "none"}}>
 					<div id="cart-total">${carttotal}</div>
 				</div>
 				{image}
@@ -278,6 +328,7 @@ var routerInstance = render((
 			<Route path="/" component={App}>
 				<IndexRoute component={Home}/>
 				<Route path="widgets/:id" component={Widget}/>
+				<Route path="delay/:delay/widgets/:id" component={Widget}/>
 			</Route>
 		</Router>
 ), document.getElementById("root"));

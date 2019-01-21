@@ -23,6 +23,11 @@
  * * Manually sent errors via {@link BOOMR.plugins.Errors.send}
  * * Functions that threw an exception that were wrapped via {@link BOOMR.plugins.Errors.wrap}
  * * Functions that threw an exception that were run via {@link BOOMR.plugins.Errors.test}
+ * * JavaScript runtime errors captured via the
+ *   [`unhandledrejection`](https://developer.mozilla.org/en-US/docs/Web/Events/unhandledrejection)
+ *   global event handler. Disabled by default.
+ * * JavaScript runtime warnings captured via the
+ *   [`Reporting API`](https://www.w3.org/TR/reporting/#reporting-observer). Disabled by default.
  *
  * These are all enabled by default, and can be
  * {@link BOOMR.plugins.Errors.init manually turned off}.
@@ -368,6 +373,7 @@
  * * `BOOMR_plugins_errors_console_error`
  * * `BOOMR_plugins_errors_wrap`
  * * `BOOMR.window.console.error`
+ * * `BOOMR_plugins_errors_onrejection`
  *
  * ## Beacon Parameters
  *
@@ -952,7 +958,7 @@
 		}
 
 		// fixup some old browser types
-		if (error.message &&
+		if (typeof error.message === "string" &&
 		    error.message.indexOf("ReferenceError:") !== -1 &&
 		    error.name === "Error") {
 			error.name = "ReferenceError";
@@ -993,6 +999,8 @@
 		monitorConsole: true,
 		monitorEvents: true,
 		monitorTimeout: true,
+		monitorRejections: false,  // new feature, off by default
+		monitorReporting: false,  // new feature, off by default
 		sendAfterOnload: false,
 		maxErrors: 10,
 		// How often to send an error beacon after onload
@@ -1022,6 +1030,9 @@
 		 * Circular event buffer
 		 */
 		events: [],
+
+		// Reporting API observer
+		reportingObserver: undefined,
 
 		//
 		// Public Functions
@@ -1447,19 +1458,20 @@
 			}
 
 			that[fn] = function(type, listener, useCapture) {
-				idx = impl.trackedFnIdx(this, type, listener, useCapture);
+				var targetObj = this === window ? BOOMR.window : this;
+				idx = impl.trackedFnIdx(targetObj, type, listener, useCapture);
 				if (idx !== -1) {
-					wrappedFn = this._bmrEvents[idx][3];
+					wrappedFn = targetObj._bmrEvents[idx][3];
 
 					// remove our wrapped function instead
-					origFn.call(this, type, wrappedFn, useCapture);
+					origFn.call(targetObj, type, wrappedFn, useCapture);
 
 					// remove bookkeeping
-					this._bmrEvents.splice(idx, 1);
+					targetObj._bmrEvents.splice(idx, 1);
 				}
 				else {
 					// unknown, pass original args
-					origFn.call(this, type, listener, useCapture);
+					origFn.call(targetObj, type, listener, useCapture);
 				}
 			};
 		},
@@ -1550,7 +1562,7 @@
 		 * @returns {string} String version of the object
 		 */
 		normalizeToString: function(obj) {
-			if (obj === undefined) {
+			if (typeof obj === "undefined") {
 				return "undefined";
 			}
 			else if (obj === null) {
@@ -1926,9 +1938,13 @@
 		 * @param {boolean} [config.Errors.monitorNetwork] Monitor XHR errors
 		 * @param {boolean} [config.Errors.monitorConsole] Monitor `console.error`
 		 * @param {boolean} [config.Errors.monitorEvents] Monitor event callbacks
-		 * (from `addEventListener`)
+		 * (from `addEventListener`).
 		 * @param {boolean} [config.Errors.monitorTimeout] Monitor `setTimout`
 		 * and `setInterval`.
+		 * @param {boolean} [config.Errors.monitorRejections] Monitor unhandled
+		 * promise rejections.
+		 * @param {boolean} [config.Errors.monitorReporting] Monitor Reporting API
+		 * warnings.
 		 * @param {boolean} [config.Errors.sendAfterOnload] Whether or not to
 		 * send errors after the page load beacon.  If set to false, only errors
 		 * that happened up to the page load beacon will be captured.
@@ -1942,10 +1958,12 @@
 		 */
 
 		init: function(config) {
+			var i, report, msg;
+
 			BOOMR.utils.pluginConfig(impl, config, "Errors",
 				["onError", "monitorGlobal", "monitorNetwork", "monitorConsole",
-				 "monitorEvents", "monitorTimeout", "sendAfterOnload",
-				 "sendInterval", "maxErrors"]);
+				 "monitorEvents", "monitorTimeout", "monitorReporting", "monitorRejections",
+				 "sendAfterOnload", "sendInterval", "maxErrors"]);
 
 			if (impl.initialized) {
 				return this;
@@ -1989,6 +2007,12 @@
 					}
 
 					BOOMR.window.onerror = function BOOMR_plugins_errors_onerror(message, fileName, lineNumber, columnNumber, error) {
+						// onerror may be called with an `ErrorEvent` object (eg. https://github.com/angular/zone.js/issues/1108)
+						if (typeof error === "undefined" &&
+						    typeof message === "object" && typeof message.error === "object" && message.error !== null) {
+							error = message.error;
+						}
+
 						// a SyntaxError can produce a null error
 						if (typeof error !== "undefined" && error !== null) {
 							impl.send(error, E.VIA_GLOBAL_EXCEPTION_HANDLER);
@@ -2010,8 +2034,10 @@
 						}
 
 						if (typeof BOOMR.globalOnError === "function") {
-							BOOMR.globalOnError.apply(window, arguments);
+							return BOOMR.globalOnError.apply(BOOMR.window, arguments);
 						}
+
+						return false; // don't prevent the firing of the default event handler
 					};
 
 					// send any errors from the loader snippet
@@ -2037,6 +2063,36 @@
 						noStack: true
 					}, E.VIA_NETWORK);
 				});
+			}
+
+
+			// listen for unhandled promise rejections
+			if (impl.monitorRejections && BOOMR.window.PromiseRejectionEvent) {
+				// add event listener instead of window.onunhandledrejection
+				BOOMR.utils.addListener(BOOMR.window, "unhandledrejection", function BOOMR_plugins_errors_onrejection(event) {
+					var stack, message = "Unhandled Promise Rejection";
+					if (event && event.reason) {
+						if (typeof event.reason === "string") {
+							message = event.reason;
+						}
+						else {
+							if (typeof event.reason.stack === "string") {
+								stack = event.reason.stack;
+							}
+							if (typeof event.reason.message === "undefined") {
+								message = impl.normalizeToString(event.reason);
+							}
+							else {
+								message = impl.normalizeToString(event.reason.message);
+							}
+						}
+						impl.send({
+							message: message,
+							stack: stack,
+							noStack: stack ? false : true
+						}, E.VIA_REJECTION);
+					}
+				}, true);
 			}
 
 			// listen for calls to console.error
@@ -2111,6 +2167,29 @@
 				impl.wrapFn("setInterval", BOOMR.window, false, 0, E.VIA_TIMEOUT);
 			}
 
+			// listen for Reporting API warnings
+			if (impl.monitorReporting && BOOMR.window.ReportingObserver) {
+				impl.reportingObserver = new BOOMR.window.ReportingObserver(function(reports, observer) {
+					if (BOOMR.utils.isArray(reports)) {
+						for (i = 0; i < reports.length; i++) {
+							report = reports[i];
+							msg = report && report.body && (report.body.message || report.body.reason);
+							if (msg) {
+								impl.send({
+									message: msg,
+									fileName: report.body.sourceFile || report.url,
+									lineNumber: report.body.lineNumber,
+									columnNumber: report.body.columnNumber,
+									noStack: true
+								}, E.VIA_REPORTING_API);
+							}
+						}
+					}
+				}, {buffered: true});
+				impl.reportingObserver.observe();
+			}
+
+
 			return this;
 		},
 
@@ -2182,6 +2261,16 @@
 		 * This was caught by monitoring `setTimeout()` or `setInterval()`
 		 */
 		VIA_TIMEOUT: 6,
+
+		/**
+		 * This was caught by monitoring unhandled promise rejection events
+		 */
+		VIA_REJECTION: 7,
+
+		/**
+		 * Observed with the Reporting API
+		 */
+		VIA_REPORTING_API: 8,
 
 		//
 		// Events

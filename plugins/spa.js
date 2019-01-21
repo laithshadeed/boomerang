@@ -2,7 +2,7 @@
  * Enables Single Page App (SPA) performance monitoring.
  *
  * **Note**: The `SPA` plugin requires the {@link BOOMR.plugins.AutoXHR} plugin
- * and one of the following SPA plugins to work:
+ * to be loaded before `SPA`, and one of the following SPA plugins to work:
  *
  * * {@link BOOMR.plugins.Angular}
  * * {@link BOOMR.plugins.Backbone}
@@ -23,7 +23,7 @@
  * monitors navigations on traditional websites.
  *
  * On traditional websites, the browser completes a full navigation for every page.
- * During this navigation, the browser requests the page’s HTML, JavaScript,
+ * During this navigation, the browser requests the page's HTML, JavaScript,
  * CSS, etc., from the server, and builds the page from these components. Boomerang
  * monitors this entire process.
  *
@@ -31,7 +31,7 @@
  * navigation. All subsequent navigations are handled by the SPA framework
  * itself (i.e. AngularJS), where they dynamically pull in the content they
  * need to render the new page. This is done without executing a full navigation
- * from the browser’s point of view.
+ * from the browser's point of view.
  *
  * Boomerang was designed for traditional websites, where a full navigation
  * occurs on each page load. During the navigation, Boomerang tracks the
@@ -46,8 +46,8 @@
  * navigations beyond the first, initial navigation.
  *
  * To do so, the Boomerang SPA plugins listen for several life cycle events from
- * the framework, such as AngularJS’s `$routeChangeStart`. Once it gets notified
- * of these events, the Boomerang SPA plugins start monitoring the page’s markup
+ * the framework, such as AngularJS's `$routeChangeStart`. Once it gets notified
+ * of these events, the Boomerang SPA plugins start monitoring the page's markup
  * (DOM) for changes. If any of these changes trigger a download, such as a
  * XHR, image, CSS, or JavaScript, then the Boomerang SPA plugins monitor those
  * resources as well. Only once all of these new resources have been fetched do
@@ -130,7 +130,7 @@
 	 * @param {string} msg Message
 	 */
 	function log(msg) {
-		BOOMR.debug(msg, "spa");
+		BOOMR.debug(msg, "SPA");
 	}
 
 	var impl = {
@@ -150,32 +150,28 @@
 		 * @param {BOOMR.plugins.AutoXHR.Resource} resource Resource
 		 */
 		spaHardMissedOnComplete: function(resource) {
+			var p, navigationStart = (BOOMR.plugins.RT && BOOMR.plugins.RT.navigationStart());
+
 			waitingOnHardMissedComplete = false;
-
-			var p = BOOMR.getPerformance(), startTime, stopTime;
-
-			// gather start times from NavigationTiming if available
-			if (p && p.timing && p.timing.navigationStart && p.timing.loadEventEnd) {
-				startTime = p.timing.navigationStart;
-				stopTime = p.timing.loadEventEnd;
-			}
-			else {
-				startTime = BOOMR.t_start;
-			}
 
 			// note that we missed the route change on the beacon for debugging
 			BOOMR.addVar("spa.missed", "1");
 
 			// ensure t_done is the time we've specified
-			BOOMR.plugins.RT.clearTimer("t_done");
+			if (BOOMR.plugins.RT) {
+				BOOMR.plugins.RT.clearTimer("t_done");
+			}
 
 			// always use the start time of navigationStart
-			resource.timing.requestStart = startTime;
+			resource.timing.requestStart = navigationStart;
 
-			if (resource.resources.length === 0 && stopTime) {
+			if (resource.resources.length === 0) {
 				// No other resources were fetched, so set the end time
-				// to NavigationTiming's performance.loadEventEnd (instead of 'now')
-				resource.timing.loadEventEnd = stopTime;
+				// to NavigationTiming's performance.loadEventEnd if available (instead of 'now')
+				p = BOOMR.getPerformance();
+				if (p && p.timing && p.timing.navigationStart && p.timing.loadEventEnd) {
+					resource.timing.loadEventEnd = p.timing.loadEventEnd;
+				}
 			}
 		},
 
@@ -278,6 +274,8 @@
 			waitingOnHardMissedComplete = true;
 
 			if (!disableHardNav) {
+				// `this` is unbound, use BOOMR.plugins.SPA
+				BOOMR.fireEvent("spa_init", [BOOMR.plugins.SPA.current_spa_nav(), BOOMR.window.document.URL]);
 				// Trigger a route change
 				BOOMR.plugins.SPA.route_change(impl.spaHardMissedOnComplete);
 			}
@@ -359,7 +357,8 @@
 		},
 
 		/**
-		 * Called by a framework when a route change has happened
+		 * Called by a framework when a route change has started.  The SPA plugin will
+		 * begin monitoring downloadable resources to measure the SPA soft navigation.
 		 *
 		 * @param {function} onComplete Called on completion
 		 * @param {object[]} routeFilterArgs Route Filter arguments
@@ -389,7 +388,8 @@
 
 			// If this was the first request, use navStart as the begin timestamp.  Otherwise, use
 			// "now" as the begin timestamp.
-			var requestStart = initialRouteChangeCompleted ? BOOMR.now() : BOOMR.plugins.RT.navigationStart();
+			var navigationStart = (BOOMR.plugins.RT && BOOMR.plugins.RT.navigationStart());
+			var requestStart = initialRouteChangeCompleted ? BOOMR.now() : navigationStart;
 
 			// use the document.URL even though it may be the URL of the previous nav. We will updated
 			// it in AutoXHR sendEvent

@@ -33,8 +33,7 @@
  * * `u`: The page's URL (for most beacons), or the `XMLHttpRequest` URL
  * * `pgu`: The page's URL (for `XMLHttpRequest` beacons)
  * * `pid`: Page ID (8 characters)
- * * `r`: Navigation referrer (from the cookie)
- * * `r2`: Navigation referrer (from `document.location`, if different than `r`)
+ * * `r`: Navigation referrer (from `document.location`)
  * * `vis.pre`: `1` if the page transitioned from prerender to visible
  * * `xhr.pg`: The `XMLHttpRequest` page group
  * * `errors`: Error messages of errors detected in Boomerang code, separated by a newline
@@ -340,6 +339,9 @@ BOOMR_check_doc_domain();
 		// Beacon URL
 		beacon_url: "",
 
+		// Forces protocol-relative URLs to HTTPS
+		beacon_url_force_https: true,
+
 		// List of string regular expressions that must match the beacon_url.  If
 		// not set, or the list is empty, all beacon URLs are allowed.
 		beacon_urls_allowed: [],
@@ -355,8 +357,17 @@ BOOMR_check_doc_domain();
 		beacon_auth_key: "Authorization",
 
 		// Beacon authorization token. This is only needed if your are using a POST
-		// and the beacon requires an Authorization token to accept your data.
+		// and the beacon requires an Authorization token to accept your data.  This
+		// disables use of the browser sendBeacon() API.
 		beacon_auth_token: undefined,
+
+		// Sends beacons with Credentials (applies to XHR beacons, not IMG or `sendBeacon()`).
+		// If you need this, you may want to enable `beacon_disable_sendbeacon` as
+		// `sendBeacon()` does not support credentials.
+		beacon_with_credentials: false,
+
+		// Disables navigator.sendBeacon() support
+		beacon_disable_sendbeacon: false,
 
 		// Strip out everything except last two parts of hostname.
 		// This doesn't work well for domains that end with a country tld,
@@ -375,17 +386,17 @@ BOOMR_check_doc_domain();
 		// Whether or not we've sent a page load beacon
 		hasSentPageLoadBeacon: false,
 
-		// cookie referrer
-		r: undefined,
-
 		// document.referrer
-		r2: undefined,
+		r: undefined,
 
 		// strip_query_string: false,
 
 		// onloadfired: false,
 
 		// handlers_attached: false,
+
+		// waiting_for_config: false,
+
 		events: {
 			/**
 			 * Boomerang event, subscribe via {@link BOOMR.subscribe}.
@@ -583,6 +594,15 @@ BOOMR_check_doc_domain();
 			 * @event BOOMR#spa_navigation
 			 */
 			"spa_navigation": [],
+
+			/**
+			 * Boomerang event, subscribe via {@link BOOMR.subscribe}.
+			 *
+			 * Fired whenever a SPA navigation is cancelled.
+			 *
+			 * @event BOOMR#spa_cancel
+			 */
+			"spa_cancel": [],
 
 			/**
 			 * Boomerang event, subscribe via {@link BOOMR.subscribe}.
@@ -871,14 +891,14 @@ BOOMR_check_doc_domain();
 			var name = impl.LOCAL_STORAGE_PREFIX + "clss";
 			impl.localStorageSupported = false;
 
-			// we need JSON and localStorage support
-			if (!w.JSON || !w.localStorage) {
-				return;
-			}
-
 			// Browsers with cookies disabled or in private/incognito mode may throw an
 			// error when accessing the localStorage variable
 			try {
+				// we need JSON and localStorage support
+				if (!w.JSON || !w.localStorage) {
+					return;
+				}
+
 				w.localStorage.setItem(name, name);
 				impl.localStorageSupported = (w.localStorage.getItem(name) === name);
 				w.localStorage.removeItem(name);
@@ -923,6 +943,15 @@ BOOMR_check_doc_domain();
 		url: "",
 
 		/**
+		 * (Optional) URL of configuration file
+		 *
+		 * @type {string}
+		 *
+		 * @memberof BOOMR
+		 */
+		config_url: null,
+
+		/**
 		 * Whether or not Boomerang was loaded after the `onload` event.
 		 *
 		 * @type {boolean}
@@ -930,6 +959,16 @@ BOOMR_check_doc_domain();
 		 * @memberof BOOMR
 		 */
 		loadedLate: false,
+
+		/**
+		 * Current number of beacons sent.
+		 *
+		 * Will be incremented and added to outgoing beacon as `n`.
+		 *
+		 * @type {number}
+		 *
+		 */
+		beaconsSent: 0,
 
 		/**
 		 * Constants visible to the world
@@ -955,6 +994,60 @@ BOOMR_check_doc_domain();
 			 * @memberof BOOMR.constants
 			 */
 			MAX_GET_LENGTH: 2000
+		},
+
+		/**
+		 * Session data
+		 * @class BOOMR.session
+		 */
+		session: {
+			/**
+			 * Session Domain.
+			 *
+			 * You can disable all cookies by setting site_domain to a falsy value.
+			 *
+			 * @type {string}
+			 *
+			 * @memberof BOOMR.session
+			 */
+			domain: impl.site_domain,
+
+			/**
+			 * Session ID.  This will be randomly generated in the client but may
+			 * be overwritten by the server if not set.
+			 *
+			 * @type {string}
+			 *
+			 * @memberof BOOMR.session
+			 */
+			ID: Math.random().toString(36).replace(/^0\./, ""),
+
+			/**
+			 * Session start time.
+			 *
+			 * @type {TimeStamp}
+			 *
+			 * @memberof BOOMR.session
+			 */
+			start: undefined,
+
+			/**
+			 * Session length (number of pages)
+			 *
+			 * @type {number}
+			 *
+			 * @memberof BOOMR.session
+			 */
+			length: 0,
+
+			/**
+			 * Session enabled (Are session cookies enabled?)
+			 *
+			 * @type {boolean}
+			 *
+			 * @memberof BOOMR.session
+			 */
+			enabled: true
 		},
 
 		/**
@@ -1091,8 +1184,8 @@ BOOMR_check_doc_domain();
 			setCookie: function(name, subcookies, max_age) {
 				var value, nameval, savedval, c, exp;
 
-				if (!name || !impl.site_domain || typeof subcookies === "undefined") {
-					BOOMR.debug("Invalid parameters or site domain: " + name + "/" + subcookies + "/" + impl.site_domain);
+				if (!name || !BOOMR.session.domain || typeof subcookies === "undefined") {
+					BOOMR.debug("Invalid parameters or site domain: " + name + "/" + subcookies + "/" + BOOMR.session.domain);
 
 					BOOMR.addVar("nocookie", 1);
 					return false;
@@ -1102,7 +1195,7 @@ BOOMR_check_doc_domain();
 				nameval = name + "=\"" + value + "\"";
 
 				if (nameval.length < 500) {
-					c = [nameval, "path=/", "domain=" + impl.site_domain];
+					c = [nameval, "path=/", "domain=" + BOOMR.session.domain];
 					if (typeof max_age === "number") {
 						exp = new Date();
 						exp.setTime(exp.getTime() + max_age * 1000);
@@ -1715,7 +1808,7 @@ BOOMR_check_doc_domain();
 					if (params[i]) {
 						kv = params[i].split("=");
 						if (kv.length && kv[0] === param) {
-							return decodeURIComponent(kv[1].replace(/\+/g, " "));
+							return kv.length > 1 ? decodeURIComponent(kv.splice(1).join("=").replace(/\+/g, " ")) : "";
 						}
 					}
 				}
@@ -1899,6 +1992,20 @@ BOOMR_check_doc_domain();
 			 */
 			windowWidth: function() {
 				return w.innerWidth || w.document.documentElement.clientWidth || w.document.body.clientWidth;
+			},
+
+			/**
+			 * Determines if the function is native or not
+			 *
+			 * @param {function} fn Function
+			 *
+			 * @returns {boolean} True when the function is native
+			 */
+			isNative: function(fn) {
+				return !!fn &&
+				    fn.toString &&
+				    !fn.hasOwnProperty("toString") &&
+				    /\[native code\]/.test(String(fn));
 			}
 
 			/* BEGIN_DEBUG */
@@ -1968,8 +2075,11 @@ BOOMR_check_doc_domain();
 		 * need to call {@link BOOMR.page_ready} yourself.
 		 * @param {string} config.beacon_auth_key Beacon authorization key value
 		 * @param {string} config.beacon_auth_token Beacon authorization token.
+		 * @param {boolean} config.beacon_with_credentials Sends beacon with credentials
+		 * @param {boolean} config.beacon_disable_sendbeacon Disables `navigator.sendBeacon()` support
 		 * @param {string} config.beacon_url The URL to beacon results back to.
 		 * If not set, no beacon will be sent.
+		 * @param {boolean} config.beacon_url_force_https Forces protocol-relative Beacon URLs to HTTPS
 		 * @param {string} config.beacon_type `GET`, `POST` or `AUTO`
 		 * @param {string} [config.site_domain] The domain that all cookies should be set on
 		 * Boomerang will try to auto-detect this, but unless your site is of the
@@ -1997,7 +2107,10 @@ BOOMR_check_doc_domain();
 				    "autorun",
 				    "beacon_auth_key",
 				    "beacon_auth_token",
+				    "beacon_with_credentials",
+				    "beacon_disable_sendbeacon",
 				    "beacon_url",
+				    "beacon_url_force_https",
 				    "beacon_type",
 				    "site_domain",
 				    "strip_query_string",
@@ -2027,6 +2140,10 @@ BOOMR_check_doc_domain();
 
 			if (config.primary && impl.handlers_attached) {
 				return this;
+			}
+
+			if (config.site_domain !== undefined) {
+				this.session.domain = config.site_domain;
 			}
 
 			// Set autorun if in config right now, as plugins that listen for page_ready
@@ -2087,19 +2204,41 @@ BOOMR_check_doc_domain();
 				}
 			}
 
+			// if it's the first call to init (handlers aren't attached) and we're not asked to wait OR
+			// it's the second init call (handlers are attached) and we were previously waiting
+			// then we set up the page ready autorun functionality
+			if ((!impl.handlers_attached && !config.wait) || (impl.handlers_attached && impl.waiting_for_config)) {
+				// The developer can override onload by setting autorun to false
+				if (!impl.onloadfired && (impl.autorun === undefined || impl.autorun !== false)) {
+					if (BOOMR.hasBrowserOnloadFired()) {
+						BOOMR.loadedLate = true;
+					}
+					BOOMR.attach_page_ready(BOOMR.page_ready_autorun);
+				}
+				impl.waiting_for_config = false;
+			}
+
+			// only attach handlers once
 			if (impl.handlers_attached) {
 				return this;
 			}
 
-			// The developer can override onload by setting autorun to false
-			if (!impl.onloadfired && (config.autorun === undefined || config.autorun !== false)) {
-				if (BOOMR.hasBrowserOnloadFired()) {
-					BOOMR.loadedLate = true;
-				}
-				BOOMR.attach_page_ready(BOOMR.page_ready_autorun);
+			if (config.wait) {
+				impl.waiting_for_config = true;
 			}
 
+			BOOMR.attach_page_ready(function() {
+				// if we're not using the loader snippet, save the onload time for
+				// browsers that do not support NavigationTiming.
+				// This will be later than onload if boomerang arrives late on the
+				// page but it's the best we can do
+				if (!BOOMR.t_onload) {
+					BOOMR.t_onload = BOOMR.now();
+				}
+			});
+
 			BOOMR.utils.addListener(w, "DOMContentLoaded", function() { impl.fireEvent("dom_loaded"); });
+
 			BOOMR.fireEvent("config", config);
 			BOOMR.subscribe("config", function(beaconConfig) {
 				if (beaconConfig.beacon_url) {
@@ -2618,6 +2757,8 @@ BOOMR_check_doc_domain();
 		addError: function BOOMR_addError(err, src, extra) {
 			var str, E = BOOMR.plugins.Errors;
 
+			BOOMR.error("Boomerang caught error: " + err + ", src: " + src + ", extra: " + extra);
+
 			//
 			// Use the Errors plugin if it's enabled
 			//
@@ -2677,11 +2818,12 @@ BOOMR_check_doc_domain();
 		 * @memberof BOOMR
 		 */
 		isCrossOriginError: function(err) {
-			// These are expected for cross-origin iframe access, although the Internet Explorer check will only
-			// work for browsers using English.
+			// These are expected for cross-origin iframe access.
+			// For IE and Edge, we'll also check the error number for non-English browsers
 			return err.name === "SecurityError" ||
 				(err.name === "TypeError" && err.message === "Permission denied") ||
-				(err.name === "Error" && err.message && err.message.match(/^(Permission|Access is) denied/));
+				(err.name === "Error" && err.message && err.message.match(/^(Permission|Access is) denied/)) ||
+				err.number === -2146828218;  // IE/Edge error number for "Permission Denied"
 		},
 
 		/**
@@ -2846,24 +2988,15 @@ BOOMR_check_doc_domain();
 		},
 
 		/**
-		 * Sets the Referrers variables.
+		 * Sets the Referrers variable.
 		 *
-		 * @param {string} r Referrer from the cookie
-		 * @param {string} [r2] Referrer from document.referrer, if different
+		 * @param {string} r Referrer from the document.referrer
 		 *
 		 * @memberof BOOMR
 		 */
-		setReferrer: function(r, r2) {
-			// cookie referrer
+		setReferrer: function(r) {
+			// document.referrer
 			impl.r = r;
-
-			// document.referrer, if different
-			if (r2 && r !== r2) {
-				impl.r2 = r2;
-			}
-			else {
-				impl.r2 = undefined;
-			}
 		},
 
 		/**
@@ -2993,8 +3126,8 @@ BOOMR_check_doc_domain();
 		},
 
 		//
-		// uninstrumentXHR and instrumentXHR are stubs that will be replaced
-		// by auto-xhr.js if active.
+		// uninstrumentXHR, instrumentXHR, uninstrumentFetch and instrumentFetch
+		// are stubs that will be replaced by auto-xhr.js if active.
 		//
 		/**
 		 * Undo XMLHttpRequest instrumentation and reset the original `XMLHttpRequest`
@@ -3004,8 +3137,7 @@ BOOMR_check_doc_domain();
 		 *
 		 * @memberof BOOMR
 		 */
-		uninstrumentXHR: function() {
-		},
+		uninstrumentXHR: function() { },
 
 		/**
 		 * Instrument all requests made via XMLHttpRequest to send beacons.
@@ -3015,6 +3147,25 @@ BOOMR_check_doc_domain();
 		 * @memberof BOOMR
 		 */
 		instrumentXHR: function() { },
+
+		/**
+		 * Undo fetch instrumentation and reset the original `fetch`
+		 * function
+		 *
+		 * This is implemented in `plugins/auto-xhr.js` {@link BOOMR.plugins.AutoXHR}.
+		 *
+		 * @memberof BOOMR
+		 */
+		uninstrumentFetch: function() { },
+
+		/**
+		 * Instrument all requests made via fetch to send beacons.
+		 *
+		 * This is implemented in `plugins/auto-xhr.js` {@link BOOMR.plugins.AutoXHR}.
+		 *
+		 * @memberof BOOMR
+		 */
+		instrumentFetch: function() { },
 
 		/**
 		 * Request boomerang to send its beacon with all queued beacon data
@@ -3136,14 +3287,13 @@ BOOMR_check_doc_domain();
 				delete impl.vars.r;
 			}
 
-			if (impl.r2) {
-				impl.vars.r2 = BOOMR.utils.cleanupURL(impl.r2);
-			}
-			else {
-				delete impl.vars.r2;
-			}
-
 			impl.vars.v = BOOMR.version;
+
+			if (BOOMR.session.enabled) {
+				impl.vars["rt.si"] = BOOMR.session.ID + "-" + Math.round(BOOMR.session.start / 1000).toString(36);
+				impl.vars["rt.ss"] = BOOMR.session.start;
+				impl.vars["rt.sl"] = BOOMR.session.length;
+			}
 
 			if (BOOMR.visibilityState()) {
 				impl.vars["vis.st"] = BOOMR.visibilityState();
@@ -3161,6 +3311,9 @@ BOOMR_check_doc_domain();
 			if (this.pageId) {
 				impl.vars.pid = this.pageId;
 			}
+
+			// add beacon number
+			impl.vars.n = ++this.beaconsSent;
 
 			if (w !== window) {
 				_if = "if";  // work around uglifyJS minification that breaks in IE8 and quirks mode
@@ -3191,7 +3344,7 @@ BOOMR_check_doc_domain();
 				}
 			}
 
-			BOOMR.removeVar("qt");
+			BOOMR.removeVar(["qt", "pgu"]);
 
 			// remove any vars that should only be on a single beacon
 			for (var singleVarName in impl.singleBeaconVars) {
@@ -3211,6 +3364,12 @@ BOOMR_check_doc_domain();
 				BOOMR.setImmediate(function() {
 					impl.fireEvent("page_load_beacon", varsSent);
 				});
+			}
+
+			// Stop at this point if we are rate limited
+			if (BOOMR.session.rate_limited) {
+				BOOMR.debug("Skipping because we're rate limited");
+				return false;
 			}
 
 			// send the beacon data
@@ -3270,6 +3429,11 @@ BOOMR_check_doc_domain();
 			params = urlFirst.concat(this.getVarsOfPriority(data, 0), urlLast);
 			paramsJoined = params.join("&");
 
+			// If beacon_url is protocol relative, make it https only
+			if (impl.beacon_url_force_https && impl.beacon_url.match(/^\/\//)) {
+				impl.beacon_url = "https:" + impl.beacon_url;
+			}
+
 			// if there are already url parameters in the beacon url,
 			// change the first parameter prefix for the boomerang url parameters to &
 			url = impl.beacon_url + ((impl.beacon_url.indexOf("?") > -1) ? "&" : "?") + paramsJoined;
@@ -3278,17 +3442,33 @@ BOOMR_check_doc_domain();
 			// Try to send an IMG beacon if possible (which is the most compatible),
 			// otherwise send an XHR beacon if the  URL length is longer than 2,000 bytes.
 			//
-			if (impl.beacon_type === "POST" || url.length > BOOMR.constants.MAX_GET_LENGTH) {
+			if (impl.beacon_type === "GET") {
+				useImg = true;
+
+				if (url.length > BOOMR.constants.MAX_GET_LENGTH) {
+					((window.console && (console.warn || console.log)) || function() {})("Boomerang: Warning: Beacon may not be sent via GET due to payload size > 2000 bytes");
+				}
+			}
+			else if (impl.beacon_type === "POST" || url.length > BOOMR.constants.MAX_GET_LENGTH) {
 				// switch to a XHR beacon if the the user has specified a POST OR GET length is too long
 				useImg = false;
 			}
 
 			//
-			// Try the sendBeacon API first
+			// Try the sendBeacon API first.
+			// But if beacon_type is set to "GET", dont attempt
+			// sendBeacon API call
 			//
 			if (w && w.navigator &&
 			    typeof w.navigator.sendBeacon === "function" &&
-			    typeof w.Blob === "function") {
+			    BOOMR.utils.isNative(w.navigator.sendBeacon) &&
+			    typeof w.Blob === "function" &&
+			    impl.beacon_type !== "GET" &&
+			    // As per W3C, The sendBeacon method does not provide ability to pass any
+			    // header other than 'Content-Type'. So if we need to send data with
+			    // 'Authorization' header, we need to fallback to good old xhr.
+			    typeof impl.beacon_auth_token === "undefined" &&
+			    !impl.beacon_disable_sendbeacon) {
 				// note we're using sendBeacon with &sb=1
 				var blobData = new w.Blob([paramsJoined + "&sb=1"], {
 					type: "application/x-www-form-urlencoded"
@@ -3375,6 +3555,10 @@ BOOMR_check_doc_domain();
 				xhr.setRequestHeader(impl.beacon_auth_key, impl.beacon_auth_token);
 			}
 
+			if (impl.beacon_with_credentials) {
+				xhr.withCredentials = true;
+			}
+
 			xhr.send(paramsJoined);
 		},
 
@@ -3389,29 +3573,20 @@ BOOMR_check_doc_domain();
 		 * @memberof BOOMR
 		 */
 		getVarsOfPriority: function(vars, pri) {
-			var name, url = [];
+			var name, url = [],
+			    // if we were given a priority, iterate over that list
+			    // else iterate over vars
+			    iterVars = (pri !== 0 ? impl.varPriority[pri] : vars);
 
-			if (pri !== 0) {
-				// if we were given a priority, iterate over that list
-				for (name in impl.varPriority[pri]) {
-					if (impl.varPriority[pri].hasOwnProperty(name)) {
-						// if this var is set, add it to our URL array
-						if (vars.hasOwnProperty(name)) {
-							url.push(this.getUriEncodedVar(name, vars[name]));
+			for (name in iterVars) {
+				// if this var is set, add it to our URL array
+				if (iterVars.hasOwnProperty(name) && vars.hasOwnProperty(name)) {
+					url.push(this.getUriEncodedVar(name, typeof vars[name] === "undefined" ? "" : vars[name]));
 
-							// remove this name from vars so it isn't also added
-							// to the non-prioritized list when pri=0 is called
-							delete vars[name];
-						}
-					}
-				}
-			}
-			else {
-				// if we weren't given a priority, iterate over all of the vars
-				// that are left (from not being removed via earlier pri -1 or 1)
-				for (name in vars) {
-					if (vars.hasOwnProperty(name)) {
-						url.push(this.getUriEncodedVar(name, vars[name]));
+					// remove this name from vars so it isn't also added
+					// to the non-prioritized list when pri=0 is called
+					if (pri !== 0) {
+						delete vars[name];
 					}
 				}
 			}
@@ -3451,28 +3626,36 @@ BOOMR_check_doc_domain();
 		 *
 		 * @param {string} url Resource URL
 		 * @param {function} [sort] Sort the entries before returning the last one
+		 * @param {function} [filter] Filter the entries. Will be applied before sorting
 		 *
 		 * @returns {PerformanceEntry|undefined} Entry, or undefined if ResourceTiming is not
 		 *  supported or if the entry doesn't exist
 		 *
 		 * @memberof BOOMR
 		 */
-		getResourceTiming: function(url, sort) {
+		getResourceTiming: function(url, sort, filter) {
 			var entries, p = BOOMR.getPerformance();
 
 			try {
 				if (p && typeof p.getEntriesByName === "function") {
 					entries = p.getEntriesByName(url);
-					if (entries && entries.length) {
-						if (typeof sort === "function") {
-							entries.sort(sort);
-						}
-						return entries[entries.length - 1];
+					if (!entries || !entries.length) {
+						return;
 					}
+					if (typeof filter === "function") {
+						entries = BOOMR.utils.arrayFilter(entries, filter);
+						if (!entries || !entries.length) {
+							return;
+						}
+					}
+					if (entries.length > 1 && typeof sort === "function") {
+						entries.sort(sort);
+					}
+					return entries[entries.length - 1];
 				}
 			}
-			catch (ignore) {
-				// empty
+			catch (e) {
+				BOOMR.warn("getResourceTiming:" + e);
 			}
 		}
 

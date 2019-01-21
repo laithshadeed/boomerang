@@ -122,7 +122,7 @@
  * * A timeline (`c.t.busy`) and the overall Page Busy % (`c.b`) will be added to the
  *     beacon (see Beacon Parameters details below)
  *
- * Enabling Page Busy monitoring should not have a noticable effect on the page load
+ * Enabling Page Busy monitoring should not have a noticeable effect on the page load
  * experience.  The 32-millisecond polling is lightweight and should barely register
  * on JavaScript CPU profiles.
  *
@@ -147,7 +147,7 @@
  * * A timeline (`c.t.fps`) and many Frame Rate metrics (`c.f.*`) will be added to the
  *     beacon (see Beacon Parameters details below)
  *
- * Enabling Frame Rate monitoring should not have a noticable effect on the page load
+ * Enabling Frame Rate monitoring should not have a noticeable effect on the page load
  * experience.  The frame callback may happen up to the device's refresh rate (which
  * is often 60 FPS), and the work done in the callback should be barely visible
  * in JavaScript CPU profiles (often less than 5ms over a page load).
@@ -309,7 +309,7 @@
  * a button has a click handler registered), you can add an
  * option {@link BOOMR.plugins.Continuity.init `ttiWaitForFrameworkReady`}.
  *
- * Once enabled, TTI won’t be calculated until the following is called:
+ * Once enabled, TTI won't be calculated until the following is called:
  *
  * ```
  * // my framework is ready
@@ -335,7 +335,7 @@
  * };
  * ```
  *
- * Note this only works in ResourceTiming-supported browsers (and won’t be used in
+ * Note this only works in ResourceTiming-supported browsers (and won't be used in
  * older browsers).
  *
  * If no images match the CSS selector at Page Load, this setting will be ignored
@@ -379,7 +379,7 @@
  *
  * If you set {@link BOOMR.plugins.Continuity.init `waitAfterOnload`} to `0`
  * (or it's not set), Boomerang will send the beacon at the regular page load
- * event.  If TTI didn’t yet happen, it won’t be reported.
+ * event.  If TTI didn't yet happen, it won't be reported.
  *
  * If you want to set {@link BOOMR.plugins.Continuity.init `waitAfterOnload`},
  * we'd recommend a value between `1000` and `5000` (1 and 5 seconds).
@@ -488,12 +488,12 @@
  *
  * ```
  * c.t.fps =
- *     [3, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 5, 7, 5, 7, 6, 5, 7, 6, 5, 6, 6, 7, 6,
- *     6, 5, 0, 7, 5, 7, 5, 6, 6, 6, 6, 6, 6, 6, 6, 5];
+ *     [3, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 5, 7, 5, 7, 6, 5, 7, 6, 5, 6, 6, 7, 6, 6,
+ *     5, 0, 7, 5, 7, 5, 6, 6, 6, 6, 6, 6, 6, 6, 5];
  *
  * c.t.domsz = [2163, 2164];
  *
- * c.t.mousepct = [0, 0, 0, 0, 0, 53, 0, 5, 7, 18];
+ * c.t.mousepct = [0, 0, 0, 0, 0, 53, 0, 0, 0, 0, 5, 7, 18];
  * ```
  *
  * The timeline can be decompressed via
@@ -635,49 +635,52 @@
  *
  * The following parameters will be added to the beacon:
  *
- * * `c.e`: Continuity Epoch timestamp (when everything started measuring) (Base-36)
- * * `c.l`: Log (compressed)
- * * `c.lt`: Long Task data (compressed)
- * * `c.lt.n`: Number of Long Tasks (Base-10)
- * * `c.lt.tt`: Total duration of Long Tasks (Base-10)
  * * `c.b`: Page Busy percentage (Base-10)
+ * * `c.c.r`: Rage click count (Base-10)
+ * * `c.c`: Click count (Base-10)
+ * * `c.e`: Continuity Epoch timestamp (when everything started measuring) (Base-36)
+ * * `c.f.d`: Frame Rate duration (how long it has been measuring) (milliseconds) (Base-10)
+ * * `c.f.l`: Number of Long Frames (>= 50ms) (Base-10)
+ * * `c.f.m`: Minimum Frame Rate (Base-10) per `COLLECTION_INTERVAL`
+ * * `c.f.s`: Frame Rate measurement start timestamp (Base-36)
+ * * `c.f`: Average Frame Rate over the Frame Rate Duration (Base-10)
+ * * `c.fid`: First Input Delay (milliseconds) (Base-10)
+ * * `c.i.a`: Average interaction delay (milliseconds) (Base-10)
+ * * `c.i.dc`: Delayed interaction count (Base-10)
+ * * `c.i.dt`: Delayed interaction time (milliseconds) (Base-10)
+ * * `c.k.e`: Keyboard ESC count (Base-10)
+ * * `c.k`: Keyboard event count (Base-10)
+ * * `c.l`: Log (compressed)
+ * * `c.lb`: Last Beacon timestamp (Base-36)
+ * * `c.lt.n`: Number of Long Tasks (Base-10)
+ * * `c.lt.tt`: Total duration of Long Tasks (milliseconds) (Base-10)
+ * * `c.lt`: Long Task data (compressed)
+ * * `c.m.n`: Mouse movement pixels (Base-10)
+ * * `c.m.p`: Mouse movement percentage (Base-10)
+ * * `c.s.d`: Distinct scrolls (scrolls that happen 2 seconds after the last) (Base-10)
+ * * `c.s.p`: Scroll percentage (Base-10)
+ * * `c.s.y`: Scroll y (pixels) (Base-10)
+ * * `c.s`: Scroll count (Base-10)
+ * * `c.t.click`: Click timeline (compressed)
+ * * `c.t.domln`: DOM Length timeline (compressed)
+ * * `c.t.domsz`: DOM Size timeline (compressed)
  * * `c.t.fps`: Frame Rate timeline (compressed)
  * * `c.t.inter`: Interactions timeline (compressed)
  * * `c.t.interdly`: Delayed Interactions timeline (compressed)
  * * `c.t.key`: Keyboard press timeline (compressed)
- * * `c.t.click`: Click timeline (compressed)
+ * * `c.t.longtask`: LongTask timeline (compressed)
+ * * `c.t.mem`: Memory usage timeline (compressed)
  * * `c.t.mouse`: Mouse movements timeline (compressed)
  * * `c.t.mousepct`: Mouse movement percentage (of full screen) timeline (compressed)
- * * `c.t.mem`: Memory usage timeline (compressed)
- * * `c.t.domsz`: DOM Size timeline (compressed)
- * * `c.t.domln`: DOM Length timeline (compressed)
+ * * `c.t.scroll`: Scroll timeline (compressed)
+ * * `c.t.scrollpct`:Scroll percentage (of full page) timeline (compressed)
  * * `c.t.mut`: DOM Mutations timeline (compressed)
- * * `c.tti.vr`: Visually Ready (Base-10)
- * * `c.tti.hi`: Hero Images ready (Base-10)
- * * `c.tti.fr`: Framework Ready (Base-10)
+ * * `c.ttfi`: Time to First Interaction (milliseconds) (Base-10)
+ * * `c.tti.fr`: Framework Ready (milliseconds) (Base-10)
+ * * `c.tti.hi`: Hero Images ready (milliseconds) (Base-10)
  * * `c.tti.m`: Time to Interactive Method (`lt`, `raf`, `b`)
- * * `c.tti`: Time to Interactive (Base-10)
- * * `c.f`: Average Frame Rate over the Frame Rate Duration (Base-10)
- * * `c.f.d`: Frame Rate duration (how long it has been measuring) (Base-10)
- * * `c.f.m`: Minimum Frame Rate (Base-10)
- * * `c.f.l`: Number of Long Frames (>= 50ms) (Base-10)
- * * `c.f.s`: Frame Rate measurement start time (Base-36)
- * * `c.k`: Keyboard event count (Base-10)
- * * `c.k.e`: Keyboard ESC count (Base-10)
- * * `c.c`: Click count (Base-10)
- * * `c.c.r`: Rage click count (Base-10)
- * * `c.m.p`: Mouse movement percentage (Base-10)
- * * `c.m.n`: Mouse movement pixels (Base-10)
- * * `c.ttfi`: Time to First Interactive (Base-10)
- * * `c.i.dc`: Delayed interaction count (Base-10)
- * * `c.i.dt`: Delayed interaction time (Base-10)
- * * `c.i.a`: Average interaction delay (Base-10)
- * * `c.fid`: First Input Delay (Base-10)
- * * `c.lb`: Last Beacon timestamp (Base-36)
- * * `c.s`: Scroll count (Base-10)
- * * `c.s.p`: Scroll percentage (Base-10)
- * * `c.s.y`: Scroll y (pixels) (Base-10)
- * * `c.s.d`: Distinct scrolls (scrolls that happen 2 seconds after the last) (Base-10)
+ * * `c.tti.vr`: Visually Ready (milliseconds) (Base-10)
+ * * `c.tti`: Time to Interactive (milliseconds) (Base-10)
  *
  * @class BOOMR.plugins.Continuity
  */
@@ -1370,13 +1373,16 @@
 			}
 
 			// find any images matching this selector or underneath this selector
-			combinedSelector = selector + ", " + selector + " * img";
+			combinedSelector = selector + ", " + selector + " * img, " + selector + " * image";
 
 			// use QSA to find all matching
 			elements = BOOMR.window.document.querySelectorAll(combinedSelector);
 			if (elements && elements.length) {
 				for (i = 0; i < elements.length; i++) {
-					src = elements[i].src;
+					src = elements[i].currentSrc ||
+						elements[i].src ||
+						(typeof elements[i].getAttribute === "function" && elements[i].getAttribute("xlink:href"));
+
 					if (src) {
 						entries = p.getEntriesByName(src);
 						if (entries && entries.length) {
@@ -3319,7 +3325,7 @@
 		 * @param {Event} e Event
 		 */
 		function onOrientationChange(e) {
-			var now = BOOMR.now();
+			var now = BOOMR.now(), angle = window.orientation;
 
 			if (!enabled) {
 				return;
@@ -3328,10 +3334,19 @@
 			// update the timeline
 			t.increment("orn");
 
-			// add to the log (don't track the actual keys)
-			t.log(LOG_TYPE_ORIENTATION, now, {
-				a: screen.orientation.angle
-			});
+			var orientation = window.screen && (screen.msOrientation || (screen.orientation || screen.mozOrientation || {}));
+
+			// override with Screen Orientation API if available
+			if (orientation && typeof orientation.angle === "number") {
+				angle = screen.orientation.angle;
+			}
+
+			if (typeof angle === "number") {
+				// add to the log (don't track the actual keys)
+				t.log(LOG_TYPE_ORIENTATION, now, {
+					a: angle
+				});
+			}
 
 			// update the interaction monitor
 			i.interact("orn", now, e);
@@ -3537,7 +3552,7 @@
 		}
 
 		// MutationObserver
-		if (typeof w.MutationObserver === "function") {
+		if (BOOMR.utils.isMutationObserverSupported()) {
 			observer = new w.MutationObserver(onMutationObserver);
 
 			// configure the observer

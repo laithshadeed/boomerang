@@ -53,6 +53,15 @@ function respond301(req, res) {
 	res.redirect(301, file);
 }
 
+function respond500(req, res) {
+	res.status(500).send();
+}
+
+function dropRequest(req, res) {
+	// drop request, no http response
+	req.socket.destroy();
+}
+
 //
 // Routes
 //
@@ -76,9 +85,26 @@ app.post("/delay", require("./route-delay"));
 app.get("/redirect", respond301);
 app.post("/redirect", respond301);
 
+// /500 - Internal Server Error
+app.get("/500", respond500);
+app.post("/500", respond500);
+
 // /chunked
 app.get("/chunked", require("./route-chunked"));
 app.post("/chunked", require("./route-chunked"));
+
+// /json - JSON output
+app.get("/json", require("./route-json"));
+app.post("/json", require("./route-json"));
+
+// /drop
+app.get("/drop", dropRequest);
+app.post("/drop", dropRequest);
+
+// load in any additional routes
+if (fs.existsSync("./routes.js")) {
+	require("./routes")(app);
+}
 
 // for every GET, look for a file with the same name appended with ".headers"
 // if found, parse the headers and write them on the response
@@ -124,5 +150,5 @@ require("express-middleware-server-timing")(app);
 // listen
 var port = process.env.PORT || env.port;
 app.listen(port, function() {
-	console.log("Server starting on port ${port} for ${wwwRoot}");
+	console.log("Server starting on port " + port + " for " + wwwRoot);
 });

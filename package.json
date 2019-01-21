@@ -1,6 +1,6 @@
 {
   "name": "boomerangjs",
-  "version": "1.568.0",
+  "version": "1.621.0",
   "releaseVersion": "1",
   "description": "boomerang always comes back, except when it hits something",
   "main": "boomerang.js",
@@ -64,9 +64,9 @@
     "karma-mocha": "^0.1.9",
     "karma-mocha-reporter": "^2.0.0",
     "karma-opera-launcher": "^1.0.0",
-    "karma-phantomjs-launcher": "^1.0.4",
     "karma-safari-launcher": "^1.0.0",
     "karma-tap-reporter": "0.0.3",
+    "karma-webdriver-launcher": "^1.0.5",
     "mocha": "^3.0.2",
     "phantomjs": "^1.9.13",
     "protractor": "^5.2.0",
@@ -78,12 +78,11 @@
   },
   "scripts": {
     "test": "grunt test",
-    "install": "test -e node_modules/protractor/bin/webdriver-manager && node node_modules/protractor/bin/webdriver-manager update",
     "lint": "grunt lint"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/SOASTA/boomerang.git"
+    "url": "https://github.com/akamai/boomerang.git"
   },
   "keywords": [
     "NavigationTiming",
@@ -201,11 +200,15 @@
     {
       "name": "Charles Vazac",
       "email": "cvazac@gmail.com"
+    },
+    {
+      "name": "Avinash Shenoy",
+      "email": "nash.shenoy@gmail.com"
     }
   ],
   "license": "BSD-3-Clause",
   "bugs": {
-    "url": "https://github.com/SOASTA/boomerang/issues"
+    "url": "https://github.com/akamai/boomerang/issues"
   },
-  "homepage": "https://github.com/SOASTA/boomerang"
+  "homepage": "https://github.com/akamai/boomerang"
 }

@@ -14,11 +14,19 @@ describe("common", function() {
 	function testSpaHardBeacon(b, prefix) {
 		assert.isUndefined(b.api, prefix + "does not have the api param");
 		assert.isUndefined(b["xhr.pg"], prefix + "does not have the xhr.pg param");
+		if (!t.doNotTestSpaAbort) {
+			assert.isUndefined(b["rt.abld"]);
+			assert.isUndefined(b["rt.quit"]);
+		}
 	}
 
 	function testSpaSoftBeacon(b, prefix) {
 		assert.isUndefined(b.api, prefix + "does not have the api param");
 		assert.isUndefined(b["xhr.pg"], prefix + "does not have the xhr.pg param");
+		if (!t.doNotTestSpaAbort) {
+			assert.isUndefined(b["rt.abld"]);
+			assert.isUndefined(b["rt.quit"]);
+		}
 	}
 
 	function testXhrBeacon(b, prefix) {
@@ -39,9 +47,24 @@ describe("common", function() {
 			now = BOOMR.now();
 			prefix = "ensure beacon " + (i + 1) + " ";
 
+			assert.equal(b.n, i + 1, prefix + "has the correct beacon number");
+
 			assert.equal(b.v, BOOMR.version, prefix + "has the boomerang version");
 
-			assert.lengthOf(b.pid, 8, prefix + "has a page ID (pid) with a length equal to 8");
+			assert.equal(b["h.key"], window.BOOMR_API_key, prefix + "has the correct API key (h.key)");
+			assert.isDefined(b["h.d"], prefix + "has the domain (h.d) param");
+
+			assert.isDefined(b["h.t"], prefix + "has the time (h.t) param");
+			tm = parseInt(b["h.t"], 10);
+			assert.operator(tm, ">", now - (60 * 1000), prefix + "time is greater than a minute ago");
+			assert.operator(tm, "<", now, prefix + "time is less than now");
+
+			if (window.BOOMR_LOGN_always !== true) {
+				assert.equal(b["h.cr"], "abc", prefix + "has the correct crumb (h.cr)");
+			}
+			else {
+				assert.isDefined(b["h.cr"], prefix + "has the crumb (h.cr)");
+			}
 
 			if (!t.doNotTestErrorsParam) {
 				assert.isUndefined(b.errors, prefix + "does not have the errors param");
@@ -140,6 +163,21 @@ describe("common", function() {
 		}
 	});
 
+	it("Should have sent beacons with the same Page ID (pid)", function() {
+		var pid, i, prefix, b;
+		if (!tf.beacons.length) {
+			return this.skip();
+		}
+
+		pid = tf.beacons[0].pid;
+		for (i = 0; i < tf.beacons.length; i++) {
+			b = tf.beacons[i];
+			prefix = "ensure beacon " + (i + 1) + " ";
+			assert.lengthOf(b.pid, 8, prefix + "has a page ID (pid) with a length equal to 8");
+			assert.equal(b.pid, pid, prefix + "has the same pid as first beacon");
+		}
+	});
+
 	it("BUG: should have sent beacons without negative timers", function() {
 		var i, b, prefix, t_done, t_resp, t_page, timers, timer;
 
@@ -169,7 +207,7 @@ describe("common", function() {
 				timers = t.parseTimers(b.t_other);
 				for (timer in timers) {
 					if (timers.hasOwnProperty(timer)) {
-						// TODO: this test reveals a bug, see https://github.com/SOASTA/soasta-boomerang/issues/626
+						// TODO: this test reveals a bug, see Issue #626
 						//assert.isTrue(timers[timer] >= 0, prefix + "has a positive 't_other." + timer + "' timer");
 						if (timers[timer] < 0) {
 							return this.skip();

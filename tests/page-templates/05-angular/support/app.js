@@ -92,6 +92,10 @@ if (!window.angular_no_route) {
 				templateUrl: "/pages/05-angular/support/widget.html",
 				controller: "widgetDetailCtrl"
 			}).
+			when("/widgets/delay/:widgetId", {
+				templateUrl: "/delay?delay=2000&file=/pages/05-angular/support/widget.html",
+				controller: "widgetDetailCtrl"
+			}).
 			when("/04-route-change.html", {
 				templateUrl: "/pages/05-angular/support/home.html",
 				controller: "mainCtrl"
@@ -138,17 +142,19 @@ app.run(["$rootScope", "$location", "$timeout", function($rootScope, $location, 
 		}
 	}
 
-	if (!hookAngularBoomerang()) {
-		if (document.addEventListener) {
-			document.addEventListener("onBoomerangLoaded", hookAngularBoomerang);
-		}
-		else if (document.attachEvent) {
-			document.attachEvent("onpropertychange", function(e) {
-				e = e || window.event;
-				if (e && e.propertyName === "onBoomerangLoaded") {
-					hookAngularBoomerang();
-				}
-			});
+	if (!window.disableBoomerangHook) {
+		if (!hookAngularBoomerang()) {
+			if (document.addEventListener) {
+				document.addEventListener("onBoomerangLoaded", hookAngularBoomerang);
+			}
+			else if (document.attachEvent) {
+				document.attachEvent("onpropertychange", function(e) {
+					e = e || window.event;
+					if (e && e.propertyName === "onBoomerangLoaded") {
+						hookAngularBoomerang();
+					}
+				});
+			}
 		}
 	}
 
