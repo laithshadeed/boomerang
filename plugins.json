@@ -8,9 +8,8 @@
         "plugins/painttiming.js",
         "plugins/navtiming.js",
         "plugins/restiming.js",
-        "plugins/mobile.js",
         "plugins/memory.js",
-		"plugins/zzz-last-plugin.js",
+        "plugins/zzz-last-plugin.js",
         "plugins/mq.js"
     ]
 }
