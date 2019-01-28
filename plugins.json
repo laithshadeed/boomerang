@@ -4,6 +4,7 @@
         "plugins/auto-xhr.js",
         "plugins/spa.js",
         "plugins/history.js",
+        "plugins/md5.js",
         "plugins/rt.js",
         "plugins/painttiming.js",
         "plugins/navtiming.js",
